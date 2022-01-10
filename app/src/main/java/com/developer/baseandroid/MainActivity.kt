@@ -1,4 +1,4 @@
-package com.developer.base_android
+package com.developer.baseandroid
 
 import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
