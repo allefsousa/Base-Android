@@ -1,41 +1,49 @@
 package com.developer.baseandroid.common
 
+import android.app.Activity
+import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import androidx.fragment.app.FragmentActivity
 import androidx.viewbinding.ViewBinding
 import com.developer.baseandroid.R
+import kotlin.properties.ReadOnlyProperty
+import kotlin.reflect.KProperty
 
-inline fun <reified T : ViewBinding> FragmentActivity.viewBinding(): Lazy<T> {
-    return viewBinding {
-        T::class.java.getMethod("bind", View::class.java).invoke(null, it) as T
+/**
+ * A delegate that lazily inflates a binding and calls [ViewBinding.setRoot] on it.
+ *
+ * @param layoutResId The layout resource id.
+ * https://github.com/yogacp/android-viewbinding
+ */
+inline fun <reified T : ViewBinding> Activity.viewBinding() = ActivityViewBindingDelegate(T::class.java)
+
+class ActivityViewBindingDelegate<T : ViewBinding>(private val bindingClass: Class<T>) :
+    ReadOnlyProperty<Activity, T> {
+    /**
+     * initiate variable for binding view
+     */
+    private var binding: T? = null
+
+    @Suppress("UNCHECKED_CAST")
+    override fun getValue(thisRef: Activity, property: KProperty<*>): T {
+        binding?.let { return it }
+
+        /**
+         * inflate View class
+         */
+        val inflateMethod = bindingClass.getMethod("inflate", LayoutInflater::class.java)
+
+        /**
+         * Bind layout
+         */
+        val invokeLayout = inflateMethod.invoke(null, thisRef.layoutInflater) as T
+
+        /**
+         * Set the content view
+         */
+        thisRef.setContentView(invokeLayout.root)
+
+        return invokeLayout.also { this.binding = it }
     }
-}
-
-fun <T : ViewBinding> FragmentActivity.viewBinding(bind: (View) -> T): Lazy<T> {
-    return lazy(LazyThreadSafetyMode.NONE) {
-        val getContentView: FragmentActivity.() -> View = {
-            checkNotNull(findViewById<ViewGroup>(R.id.content).getChildAt(0)) {
-                "Call setContentView or Use Activity's secondary constructor passing layout res id."
-            }
-        }
-        bind(getContentView())
-    }
-}
-
-inline fun <reified T : ViewBinding> FragmentActivity.withBinding(noinline withBinding: (binding: T) -> Unit) {
-    withBinding({
-        T::class.java.getMethod("bind", View::class.java).invoke(null, it) as T
-    }, withBinding)
-}
-
-
-fun <T : ViewBinding> FragmentActivity.withBinding(bind: (View) -> T, withBinding: (binding: T) -> Unit) {
-    val getContentView: FragmentActivity.() -> View = {
-        checkNotNull(findViewById<ViewGroup>(R.id.content).getChildAt(0)) {
-            "Call setContentView or Use Activity's secondary constructor passing layout res id."
-        }
-    }
-    val binding = bind(getContentView())
-    withBinding(binding)
 }

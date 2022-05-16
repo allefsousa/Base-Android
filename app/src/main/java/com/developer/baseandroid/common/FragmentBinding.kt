@@ -2,38 +2,74 @@ package com.developer.baseandroid.common
 
 import android.view.View
 import androidx.fragment.app.Fragment
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
 import androidx.viewbinding.ViewBinding
-import com.developer.baseandroid.R
 import kotlin.properties.ReadOnlyProperty
 import kotlin.reflect.KProperty
 
-inline fun <reified T : ViewBinding> Fragment.viewBinding(): ReadOnlyProperty<Fragment, T> {
-    return viewBinding {
-        T::class.java.getMethod("bind", View::class.java).invoke(null, it) as T
-    }
-}
+/*
+ * A lazy property that gets cleaned up when the fragment is destroyed.
+ *
+ * Accessing this variable in a destroyed fragment will throw NPE.
+ * https://github.com/yogacp/android-viewbinding
+ */
+inline fun <reified T : ViewBinding> Fragment.viewBinding() =
+    FragmentViewBindingDelegate(T::class.java, this)
 
-fun <T : ViewBinding> Fragment.viewBinding(bind: (View) -> T): ReadOnlyProperty<Fragment, T> {
-    return object : ReadOnlyProperty<Fragment, T> {
-        @Suppress("UNCHECKED_CAST")
-        override fun getValue(thisRef: Fragment, property: KProperty<*>): T {
-            (requireView().getTag(R.id.view_binding_tag) as? T)?.let { return it }
-            return bind(requireView()).also {
-                requireView().setTag(R.id.view_binding_tag, it)
+class FragmentViewBindingDelegate<T : ViewBinding>(
+    bindingClass: Class<T>,
+    private val fragment: Fragment
+) : ReadOnlyProperty<Fragment, T> {
+
+    /**
+     * initiate variable for binding view
+     */
+    private var binding: T? = null
+
+    /**
+     * get the bind method from View class
+     */
+    private val bindMethod = bindingClass.getMethod("bind", View::class.java)
+
+    @Suppress("UNCHECKED_CAST")
+    override fun getValue(thisRef: Fragment, property: KProperty<*>): T {
+        binding?.let { return it }
+
+        /**
+         * Adding observer to the fragment lifecycle
+         */
+        fragment.lifecycle.addObserver(object : DefaultLifecycleObserver {
+            override fun onCreate(owner: LifecycleOwner) {
+                fragment.viewLifecycleOwnerLiveData.observe(fragment) { viewLifecycleOwner ->
+                    viewLifecycleOwner.lifecycle.addObserver(object : DefaultLifecycleObserver {
+                        override fun onDestroy(owner: LifecycleOwner) {
+                            /**
+                             * Clear the binding when Fragment lifecycle called the onDestroy
+                             */
+                            binding = null
+                        }
+                    })
+                }
             }
+        })
+
+
+        /**
+         * Checking the fragment lifecycle
+         */
+        val lifecycle = fragment.viewLifecycleOwner.lifecycle
+        if (!lifecycle.currentState.isAtLeast(Lifecycle.State.INITIALIZED)) {
+            error("Cannot access view bindings. View lifecycle is ${lifecycle.currentState}!")
         }
-    }
-}
 
-inline fun <reified T : ViewBinding> Fragment.withBinding(noinline withBinding: (binding: T) -> Unit) {
-    withBinding({
-        T::class.java.getMethod("bind", View::class.java).invoke(null, it) as T
-    }, withBinding)
-}
 
-fun <T : ViewBinding> Fragment.withBinding(bind: (View) -> T, withBinding: (binding: T) -> Unit) {
-    view?.let { view ->
-        val binding = bind(view)
-        withBinding(binding)
+        /**
+         * Bind layout
+         */
+        val invoke = bindMethod.invoke(null, thisRef.requireView()) as T
+
+        return invoke.also { this.binding = it }
     }
 }
